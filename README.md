@@ -11,8 +11,13 @@ Generate a **hollow calibration cube** and **multicolor ArUco marker plates** en
       <strong>Hollow Cube with Recessed Faces</strong><br/>
       <img src="images/cube_render.png" alt="ArUco cube render" width="320"/>
     </td>
+    <td align="center">
+      <strong>ArUco Plate (Base + Marker)</strong><br/>
+      <img src="images/plate_render.png" alt="ArUco plate render" width="320"/>
+    </td>
   </tr>
 </table>
+
 
 ## 🚀 Features
 
