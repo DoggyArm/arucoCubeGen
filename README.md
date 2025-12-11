@@ -2,6 +2,18 @@
 
 Generate a **hollow calibration cube** and **multicolor ArUco marker plates** entirely in Python — perfect for camera calibration, robotics, tracking experiments, and multi-color 3D printing using Bambu Lab AMS.
 
+
+## 🖼 Preview
+
+<table>
+  <tr>
+    <td align="center">
+      <strong>Hollow Cube with Recessed Faces</strong><br/>
+      <img src="images/cube_render.png" alt="ArUco cube render" width="320"/>
+    </td>
+  </tr>
+</table>
+
 ## 🚀 Features
 
 ### 🧊 Cube Generator
