@@ -1,8 +1,14 @@
 # 📦 ArUco Cube STL Generator
 
-Generate a **hollow calibration cube** and **multicolor ArUco marker plates** entirely in Python — designed for **robust visual detection** at up to ~**1.5 m** using the **Intel RealSense D455 RGB camera**, and optimized for **Bambu Lab AMS** multi-color printing.
+Generate a **hollow calibration cube** and **multicolor ArUco marker plates** entirely in Python — designed for **robust visual detection** at up to ~**1.5 m** using the **Intel RealSense D455 RGB camera**, and optimized for **Bambu Lab AMS** multi‑color printing.
 
-This version includes a **seam-hiding plate bezel** so the marker face can be printed **face-up and matte**, avoiding glossy bed-contact artifacts that degrade detection reliability.
+This version includes:
+- a **seam‑hiding bezel** on each plate,
+- **face‑up, matte marker printing** (no bed gloss),
+- **timestamped output folders** for reproducible iteration,
+- and a **self‑documenting run_info.txt** saved with every STL batch.
+
+The project is intentionally **simple and hackable** — no GUI, no over‑engineering, just Python → STL → print.
 
 ---
 
@@ -17,7 +23,7 @@ This version includes a **seam-hiding plate bezel** so the marker face can be pr
       <img src="images/cube_render.png" alt="ArUco cube render" width="320"/>
     </td>
     <td align="center">
-      <strong>ArUco Plate with Seam-Hiding Bezel</strong><br/>
+      <strong>ArUco Plate with Seam‑Hiding Bezel</strong><br/>
       <img src="images/plate_render.png" alt="ArUco plate render" width="320"/>
     </td>
   </tr>
@@ -34,19 +40,25 @@ This version includes a **seam-hiding plate bezel** so the marker face can be pr
   - **Five recessed faces** (top, +X, −X, +Y, −Y)
   - Flat bottom for strong bed adhesion
 - Recess depth: **3 mm**, matching plate thickness
+- Designed to be printed **support‑free**
 
 ### 🧩 ArUco Plate Generator
 - **4×4 ArUco markers** (`DICT_4X4_50`, `borderBits = 1`)
 - **3 mm thick plug plates**
-- **0.8 mm raised black cells** for AMS two-color printing
-- **Integrated top-face bezel (flange)**:
+- **0.8 mm raised black cells** for AMS two‑color printing
+- **Integrated top‑face bezel (flange)**:
   - Overlaps cube slot opening
   - Hides seam and shadow lines
   - Improves detection stability
-  - Allows **face-up printing** (matte marker surface)
+  - Allows **face‑up printing** (matte marker surface)
 - Layout tuned for:
   - ~**8 px/cell at 1.5 m**
   - Increased white “quiet zone”
+
+### 🏷 Plate ID text
+- Optional **embossed ID text** on the white quiet zone
+- Implemented with a **robust raster fallback** (no font / boolean dependency)
+- Designed to be slicer‑safe (won’t disappear)
 
 ---
 
@@ -85,11 +97,11 @@ physical_width ≈ 2 × 1.5 m × tan(3.22° / 2) ≈ 84 mm
   - `PLATE_MARGIN_FRACTION = 0.88`
   - Marker area ≈ **84.1 mm**
   - Cell size ≈ **14.0 mm**
-  - Quiet zone ≈ **5.7 mm per side** (~0.4 cell)
+  - Quiet zone ≈ **5.7 mm per side**
 
 ### Why the bezel matters
 ArUco detection is sensitive to false edges near the black border:
-- Plate/cube seams
+- Plate / cube seams
 - Shadow lines
 - Texture discontinuities
 
@@ -110,35 +122,69 @@ Assumes **6×6 ArUco grid** and ~86° HFOV.
 | 2.0 m | 8 px | ~113 mm |
 | 2.0 m | 10 px | ~141 mm |
 
-**Rule of thumb**
-- Lower resolution → increase marker size
-- Narrower FOV → smaller markers acceptable
-- Motion blur / wide lenses → prefer 10 px/cell
-
 ---
 
 ## 📂 Project Structure
 
 ```
-.
-├── aruco_cube_stls.py
+aruco-cube-gen/
 ├── README.md
-└── output/
-    ├── cube_with_slots.stl
-    ├── plate_base.stl
-    ├── plate_base_id0.stl
-    ├── plate_marker_id0.stl
-    ├── plate_combined_id0.stl
-    └── …
+├── requirements.txt
+└── src/
+    └── aruco_cube_gen/
+        ├── __main__.py
+        ├── config.py          # All tunable parameters
+        ├── geometry.py        # Cube + plate geometry
+        ├── aruco_marker.py    # ArUco image → raised cells
+        ├── text3d.py          # Robust embossed text helper
+        ├── io_utils.py        # Output folders + run_info.txt
+        └── generate.py        # Orchestration
 ```
 
 ---
 
 ## ▶️ Running the Generator
 
+Create a virtual environment and install dependencies:
+
 ```bash
-python aruco_cube_stls.py
+python -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
 ```
+
+Run from the project root:
+
+```bash
+python -m src.aruco_cube_gen
+```
+
+---
+
+## 📦 Output Layout
+
+Each run creates a **new timestamped folder**:
+
+```
+out_stls_2025-12-18_16-10-37/
+├── cube_with_slots.stl
+├── plate_base.stl
+├── plate_base_id0.stl
+├── plate_marker_id0.stl
+├── plate_combined_id0.stl
+├── ...
+└── run_info.txt
+```
+
+### `run_info.txt`
+Contains:
+- Cube dimensions
+- Plate & bezel dimensions
+- ArUco dictionary and marker size
+- Plate IDs generated
+- Text settings
+
+This makes every print **self‑documenting and reproducible**.
 
 ---
 
@@ -147,37 +193,36 @@ python aruco_cube_stls.py
 ### Cube (single color)
 1. Import `cube_with_slots.stl`
 2. Supports: **OFF**
-3. Infill: **0–10%** (walls provide strength)
-4. Print orientation: flat bottom on bed
+3. Infill: **0–10%**
+4. Orientation: flat bottom on bed
 
 ### Plates (two colors via AMS)
 For each marker ID:
 
 1. Import:
-   - `plate_base_idX.stl` → assign **white (PLA matte recommended)**
-   - `plate_marker_idX.stl` → assign **black**
-2. If not aligned:
-   - Right-click → **Align → Center (XYZ)**
-3. Print orientation:
-   - **Face-up** (marker visible side up)
+   - `plate_base_idX.stl` → **white PLA (matte recommended)**
+   - `plate_marker_idX.stl` → **black**
+2. If needed:
+   - Right‑click → **Align → Center (XYZ)**
+3. Orientation:
+   - **Face‑up** (marker visible side up)
 4. Supports: **OFF**
 5. Ironing: **OFF**
 
-### Recommended plate print settings
+### Recommended plate settings
 - Layer height: **0.12–0.16 mm**
-- Filament: **PLA Matte (white)**
+- White: **PLA Matte**
+- Black: normal PLA is fine
 - No fuzzy skin on marker cells
-- Normal PLA for black is fine
 
 ---
 
 ## 🧱 Assembly
 
-1. Press-fit plates into cube recesses (0.2 mm clearance)
+1. Press‑fit plates into cube recesses (0.2 mm clearance)
 2. Bezel overlaps slot opening, hiding the seam
-3. Optional:
-   - Small drop of CA glue on the **back corners only**
-4. Orient cube so open face is down when in use
+3. Optional: tiny CA glue dot on **back corners only**
+4. Use cube with the **open face down**
 
 ---
 
@@ -189,7 +234,7 @@ pip uninstall -y opencv-python opencv-python-headless
 pip install opencv-contrib-python
 ```
 
-### Boolean operation failures
+### Boolean operation failures (cube)
 ```bash
 pip install "trimesh[easy]"
 ```
