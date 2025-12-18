@@ -12,6 +12,8 @@ This version includes:
 - **Timestamped output folders** for reproducible iteration
 - A **self-documenting `run_info.txt`** saved with every STL batch
 - Geometry tweaks for **large unsupported internal bridges**
+- A **printing-friendly “attic roof”** to reduce long internal bridging
+- **Mitered (tapered) slot edges** to avoid 90° “start in air” overhangs
 
 ---
 
@@ -25,9 +27,48 @@ This version includes:
   - Optional **open bottom** (rim retained for stiffness)
 - Recess depth: **2.4 mm**, matching plate thickness
 - Designed to be printed **support-free**
-- Geometry includes:
-  - Chamfered slot inner edges
-  - Optional internal ribs / gussets to improve long bridges
+
+#### 🧱 Printing-friendly internal geometry
+To make the cube printable without supports (and with cleaner bridging), the cube includes:
+
+**1) Roof thickener (inside-only)**
+- Adds material *from the inside* at the roof to stiffen the large internal span
+- Controlled by: `roof_extra_thickness_mm`
+- Does **not** change the cube’s external dimensions
+
+**2) “Attic roof” (internal slopes)**
+- Adds shallow internal slopes along the inside walls up to the roof underside
+- Reduces the *effective* bridge distance and improves first bridge-layer anchoring
+- Controlled by:
+  - `attic_drop_mm` (vertical drop at the walls)
+  - `attic_margin_mm` (overlap safety margin)
+
+---
+
+### 🧩 Slot System (Plates + Cube)
+The plate system is designed for **repeatable press-fit assembly** and better printability.
+
+#### 🔻 Mitered (tapered) slot edges
+The cube’s recessed slots are **tapered** so the slot has a wider opening and a slightly smaller inner face.
+
+**Why it helps**
+- Avoids sharp internal 90° ceilings where extrusion would otherwise “start in air”
+- Improves print reliability on the slot roof edges
+- Makes insertion smoother and reduces edge scraping
+
+**Key parameters**
+- `slot_depth` — depth of the recess
+- `slot_miter_mm` — taper amount (for a true 45° draft, set equal to `slot_depth`)
+
+> ⚠️ If you change taper settings, you must reprint plates so their plug taper matches.
+
+#### 🛡 Attic keepout (important)
+The attic and roof thickener **add material** on the inside of the cube. A keepout region is applied around the **top slot cavity** to prevent boolean overlap.
+
+- Controlled by: `attic_keepout_margin_mm`
+- Ensures the **top slot surface stays planar and flat**
+
+---
 
 ### 🧩 ArUco Plate Generator
 - **4×4 ArUco markers** (`DICT_4X4_50`, `borderBits = 1`)
@@ -42,7 +83,7 @@ This version includes:
 ### 🏷 Plate ID Text
 - Optional **embossed ID text** in the white quiet zone
 - Implemented with a **robust raster fallback**
-- Designed to be slicer-safe (won’t disappear in preview)
+- Designed to be slicer-safe
 
 ---
 
@@ -51,8 +92,7 @@ This version includes:
 ### Camera assumptions
 - RGB resolution: **1280 px horizontal**
 - Horizontal FOV: **~86°**
-- Marker grid: **6×6 cells**  
-  (4×4 data + `borderBits = 1`)
+- Marker grid: **6×6 cells** (4×4 data + border)
 
 ### Pixels per degree
 ```
@@ -68,66 +108,35 @@ This version includes:
 
 ## 📐 Marker Size Calculation (150 mm Cube)
 
-### Target: 1.5 m detection distance, ≥8 px/cell
+Target: **1.5 m detection distance**, ≥ **8 px/cell**
 
 ```
-cells = 6
-px_target = 8
 marker_px ≈ 48 px
-angular_width ≈ 48 / 14.9 ≈ 3.22°
-physical_width ≈ 2 × 1.5 m × tan(3.22° / 2)
-≈ 84 mm
+angular_width ≈ 3.22°
+physical_width ≈ 84 mm
 ```
 
 ➡️ **Minimum recommended marker width: ~84 mm**
 
-### Mapping to the 150 mm cube
-- Slot size:  
-  ```
-  150 × 0.85 = 127.5 mm
-  ```
-- Plate size (with clearance):  
-  ```
-  ≈ 127.1 mm
-  ```
-- Marker coverage:
-  - `PLATE_MARGIN_FRACTION = 0.88`
-  - Marker area ≈ **112 mm**
-  - Cell size ≈ **18.7 mm**
-  - Quiet zone ≈ **7.5 mm per side**
-
-This comfortably exceeds the 8 px/cell target at 1.5 m and improves robustness at longer distances.
+Mapped to cube geometry:
+- Slot size: `150 × 0.85 = 127.5 mm`
+- Plate size: `≈ 127.1 mm`
+- Marker area: `≈ 112 mm`
+- Cell size: `≈ 18.7 mm`
 
 ---
 
-## ⚠️ Long Bridges & Bambu Studio Warning
+## ⚠️ Bambu Studio Bridge Warning
 
-When importing `cube_with_slots.stl` into **Bambu Studio**, you may see:
+Bambu Studio may report **unsupported overhangs** due to the large internal roof bridge.
 
-> **“Floating cantilever / unsupported overhang”**
+✔ Geometry is intentional
+✔ Designed for support-free printing
+✔ Warning can be safely ignored
 
-### Why this happens
-- The cube intentionally contains a **large internal roof bridge**
-- There are **no generated supports by design**
-- Bambu Studio flags this heuristically, even though modern printers (including the **P2S**) can print long bridges reliably
-
-### This warning is expected
-✔ The geometry is intentional  
-✔ The part is printable without supports  
-✔ The warning can be safely ignored
-
-### Geometry tweaks applied to help bridging
-- **Chamfered slot inner edges** to avoid starting extrusion in mid-air
-- Optional **internal ribs / roof gussets** to:
-  - Reduce effective bridge span
-  - Stiffen the roof
-  - Improve first bridge layer anchoring
-
-### Recommended slicer setting
-- **Bridge speed:** **15 mm/s** (reduced from default ~50 mm/s)
-
-If you observe minor droop:
-- Slightly lower nozzle temperature (−5 °C)
+**Recommended slicer tweaks**:
+- Bridge speed: **15 mm/s**
+- Slightly lower nozzle temperature if needed
 - Increase part cooling during bridges
 
 ---
@@ -145,7 +154,7 @@ python -m src.aruco_cube_gen
 
 ## 📦 Output Layout
 
-Each run creates a **new timestamped folder**:
+Each run creates a timestamped folder:
 
 ```
 out_stls_YYYY-MM-DD_HH-MM-SS/
@@ -157,13 +166,6 @@ out_stls_YYYY-MM-DD_HH-MM-SS/
 ├── ...
 └── run_info.txt
 ```
-
-`run_info.txt` records:
-- Cube dimensions
-- Plate & bezel dimensions
-- Marker size and dictionary
-- Plate IDs
-- Text settings
 
 ---
 
