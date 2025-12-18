@@ -28,6 +28,124 @@ def make_box(extents, center) -> trimesh.Trimesh:
     box.apply_translation(np.asarray(center) - box.center_mass)
     return box
 
+def make_chamfered_slot_cutter(extents, chamfer_mm: float, open_axis: str) -> trimesh.Trimesh:
+    """
+    Create a slot cutter with a 45° chamfer around the perimeter of the OPENING face.
+
+    extents: (sx, sy, sz) for the cutter box, centered at origin.
+    open_axis: 'x', 'y', or 'z' meaning the opening face is on the +axis side.
+              (For openings on -axis, create with +axis then rotate 180° in caller.)
+    chamfer_mm: size of chamfer (mm). Typical 0.6–1.2mm.
+
+    Returns: Trimesh centered at origin.
+    """
+    sx, sy, sz = extents
+    if chamfer_mm <= 1e-6:
+        return trimesh.creation.box(extents=extents)
+
+    ch = float(chamfer_mm)
+    base = trimesh.creation.box(extents=extents)
+
+    def _rot(axis, angle_rad):
+        return trimesh.transformations.rotation_matrix(angle=angle_rad, direction=axis)
+
+    wedges = []
+
+    if open_axis == "z":
+        # Opening on +Z face, chamfer around perimeter in XY plane.
+        # Wedges along +Y and -Y edges (run along X)
+        w1 = trimesh.creation.box(extents=(sx, ch, ch))
+        w1.apply_transform(_rot([1, 0, 0], np.pi / 4))
+        w1.apply_translation([0, +sy / 2 - ch / 2, +sz / 2 - ch / 2])
+        wedges.append(w1)
+
+        w2 = trimesh.creation.box(extents=(sx, ch, ch))
+        w2.apply_transform(_rot([1, 0, 0], -np.pi / 4))
+        w2.apply_translation([0, -sy / 2 + ch / 2, +sz / 2 - ch / 2])
+        wedges.append(w2)
+
+        # Wedges along +X and -X edges (run along Y)
+        w3 = trimesh.creation.box(extents=(ch, sy, ch))
+        w3.apply_transform(_rot([0, 1, 0], -np.pi / 4))
+        w3.apply_translation([+sx / 2 - ch / 2, 0, +sz / 2 - ch / 2])
+        wedges.append(w3)
+
+        w4 = trimesh.creation.box(extents=(ch, sy, ch))
+        w4.apply_transform(_rot([0, 1, 0], np.pi / 4))
+        w4.apply_translation([-sx / 2 + ch / 2, 0, +sz / 2 - ch / 2])
+        wedges.append(w4)
+
+    elif open_axis == "x":
+        # Opening on +X face, chamfer around perimeter in YZ plane.
+        # Wedges along +Y/-Y edges (run along Z)
+        w1 = trimesh.creation.box(extents=(ch, ch, sz))
+        w1.apply_transform(_rot([0, 0, 1], -np.pi / 4))
+        w1.apply_translation([+sx / 2 - ch / 2, +sy / 2 - ch / 2, 0])
+        wedges.append(w1)
+
+        w2 = trimesh.creation.box(extents=(ch, ch, sz))
+        w2.apply_transform(_rot([0, 0, 1], np.pi / 4))
+        w2.apply_translation([+sx / 2 - ch / 2, -sy / 2 + ch / 2, 0])
+        wedges.append(w2)
+
+        # Wedges along +Z/-Z edges (run along Y)
+        w3 = trimesh.creation.box(extents=(ch, sy, ch))
+        w3.apply_transform(_rot([0, 1, 0], np.pi / 4))
+        w3.apply_translation([+sx / 2 - ch / 2, 0, +sz / 2 - ch / 2])
+        wedges.append(w3)
+
+        w4 = trimesh.creation.box(extents=(ch, sy, ch))
+        w4.apply_transform(_rot([0, 1, 0], -np.pi / 4))
+        w4.apply_translation([+sx / 2 - ch / 2, 0, -sz / 2 + ch / 2])
+        wedges.append(w4)
+
+    elif open_axis == "y":
+        # Opening on +Y face, chamfer around perimeter in XZ plane.
+        # Wedges along +X/-X edges (run along Z)
+        w1 = trimesh.creation.box(extents=(ch, ch, sz))
+        w1.apply_transform(_rot([0, 0, 1], np.pi / 4))
+        w1.apply_translation([+sx / 2 - ch / 2, +sy / 2 - ch / 2, 0])
+        wedges.append(w1)
+
+        w2 = trimesh.creation.box(extents=(ch, ch, sz))
+        w2.apply_transform(_rot([0, 0, 1], -np.pi / 4))
+        w2.apply_translation([-sx / 2 + ch / 2, +sy / 2 - ch / 2, 0])
+        wedges.append(w2)
+
+        # Wedges along +Z/-Z edges (run along X)
+        w3 = trimesh.creation.box(extents=(sx, ch, ch))
+        w3.apply_transform(_rot([1, 0, 0], -np.pi / 4))
+        w3.apply_translation([0, +sy / 2 - ch / 2, +sz / 2 - ch / 2])
+        wedges.append(w3)
+
+        w4 = trimesh.creation.box(extents=(sx, ch, ch))
+        w4.apply_transform(_rot([1, 0, 0], np.pi / 4))
+        w4.apply_translation([0, +sy / 2 - ch / 2, -sz / 2 + ch / 2])
+        wedges.append(w4)
+
+    else:
+        raise ValueError("open_axis must be one of: 'x', 'y', 'z'")
+
+    return trimesh.util.concatenate([base] + wedges)
+
+
+def rotate_180(mesh: trimesh.Trimesh, axis: str) -> trimesh.Trimesh:
+    """
+    Rotate a mesh 180° about a principal axis through the origin.
+    axis: 'x', 'y', or 'z'
+    """
+    if axis == "x":
+        R = trimesh.transformations.rotation_matrix(np.pi, [1, 0, 0])
+    elif axis == "y":
+        R = trimesh.transformations.rotation_matrix(np.pi, [0, 1, 0])
+    elif axis == "z":
+        R = trimesh.transformations.rotation_matrix(np.pi, [0, 0, 1])
+    else:
+        raise ValueError("axis must be 'x', 'y', or 'z'")
+    m = mesh.copy()
+    m.apply_transform(R)
+    return m
+
 
 def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
     """
@@ -57,12 +175,31 @@ def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
     slot_size = ce * cfg.slot_fraction
     d = cfg.slot_depth
 
-    # Slots (centered around origin, cut into faces)
-    top_slot = make_box((slot_size, slot_size, d), [0.0, 0.0, ce / 2 - d / 2])
-    posx_slot = make_box((d, slot_size, slot_size), [ce / 2 - d / 2, 0.0, 0.0])
-    negx_slot = make_box((d, slot_size, slot_size), [-ce / 2 + d / 2, 0.0, 0.0])
-    posy_slot = make_box((slot_size, d, slot_size), [0.0, ce / 2 - d / 2, 0.0])
-    negy_slot = make_box((slot_size, d, slot_size), [0.0, -ce / 2 + d / 2, 0.0])
+    # Chamfer to avoid "printing in air" on slot inner edges
+    CHAMFER_MM = 0.8  # 0.6–1.2 typical; 0.8 is a good default for 0.4 nozzle
+
+    # Top slot (+Z opening)
+    top_slot = make_chamfered_slot_cutter((slot_size, slot_size, d), CHAMFER_MM, open_axis="z")
+    top_slot.apply_translation([0.0, 0.0, ce / 2 - d / 2])
+
+    # +X slot (opening faces +X)
+    posx_slot = make_chamfered_slot_cutter((d, slot_size, slot_size), CHAMFER_MM, open_axis="x")
+    posx_slot.apply_translation([ce / 2 - d / 2, 0.0, 0.0])
+
+    # -X slot (opening faces -X) -> make +X then rotate 180° about Y
+    negx_slot = make_chamfered_slot_cutter((d, slot_size, slot_size), CHAMFER_MM, open_axis="x")
+    negx_slot = rotate_180(negx_slot, axis="y")
+    negx_slot.apply_translation([-ce / 2 + d / 2, 0.0, 0.0])
+
+    # +Y slot (opening faces +Y)
+    posy_slot = make_chamfered_slot_cutter((slot_size, d, slot_size), CHAMFER_MM, open_axis="y")
+    posy_slot.apply_translation([0.0, ce / 2 - d / 2, 0.0])
+
+    # -Y slot (opening faces -Y) -> make +Y then rotate 180° about X
+    negy_slot = make_chamfered_slot_cutter((slot_size, d, slot_size), CHAMFER_MM, open_axis="y")
+    negy_slot = rotate_180(negy_slot, axis="x")
+    negy_slot.apply_translation([0.0, -ce / 2 + d / 2, 0.0])
+
 
     slots_union = trimesh.util.concatenate([top_slot, posx_slot, negx_slot, posy_slot, negy_slot])
 
@@ -74,6 +211,54 @@ def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
             "You likely need a trimesh boolean backend (e.g., OpenSCAD).\n"
             f"Original error: {e}"
         )
+    
+    # Optional: open bottom to save filament/time, keep perimeter rim for stiffness
+    if getattr(cfg, "open_bottom", False):
+        rim_w = cfg.wall_thickness if getattr(cfg, "bottom_rim_width", 0.0) <= 0 else cfg.bottom_rim_width
+
+        # Remove only the interior bottom panel (leave a rim around edges).
+        # Outer cube is centered at origin, so bottom is at z = -ce/2.
+        # The "floor" thickness of the shell is approximately wall_thickness.
+        floor_t = cfg.wall_thickness
+        inner_xy = ce - 2 * rim_w
+        if inner_xy <= 0:
+            raise ValueError(f"bottom_rim_width too large ({rim_w}); must be < {ce/2}")
+
+        cut = make_box(
+            extents=(ce - 2 * rim_w, ce - 2 * rim_w, floor_t + 0.2),  # +0.2 for robust boolean overlap
+            center=[0.0, 0.0, -ce / 2 + (floor_t + 0.2) / 2],
+        )
+
+        shell_with_slots = shell_with_slots.difference(cut)
+
+        # Optional: internal ribs near roof to avoid huge bridging + stiffen cube
+    if getattr(cfg, "roof_ribs", False):
+        rib_t = cfg.wall_thickness if getattr(cfg, "roof_rib_thickness", 0.0) <= 0 else cfg.roof_rib_thickness
+        rib_h = float(getattr(cfg, "roof_rib_height", 12.0))
+
+        # Inner clear span (between inner walls)
+        inner_span = ce - 2 * wt
+
+        # Underside of the (non-recessed) roof in centered coordinates
+        roof_inner_z = ce / 2 - wt
+
+        # Make ribs touch/overlap the roof slightly so slicers don't drop/decouple them
+        OVERLAP_MM = 0.3
+        rib_top_z = roof_inner_z + OVERLAP_MM
+        rib_center_z = rib_top_z - rib_h / 2
+
+        rib_x = make_box(
+            extents=(inner_span, rib_t, rib_h),
+            center=[0.0, 0.0, rib_center_z],
+        )
+        rib_y = make_box(
+            extents=(rib_t, inner_span, rib_h),
+            center=[0.0, 0.0, rib_center_z],
+        )
+
+        # Concatenate is enough (they intersect the shell slightly); no boolean union needed
+        shell_with_slots = trimesh.util.concatenate([shell_with_slots, rib_x, rib_y])
+
 
     # Move cube so that bottom rests on z = 0 (nice for printing)
     min_z = shell_with_slots.bounds[0][2]

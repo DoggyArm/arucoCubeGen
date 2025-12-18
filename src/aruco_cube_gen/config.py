@@ -4,10 +4,17 @@ from typing import Optional, List
 @dataclass(frozen=True)
 class Config:
     # Cube / slot parameters
-    cube_edge: float = 120.0
-    wall_thickness: float = 6.0
-    slot_fraction: float = 0.8
-    slot_depth: float = 3.0
+    cube_edge: float = 150.0
+    wall_thickness: float = 3.2
+    slot_fraction: float = 0.85
+    slot_depth: float = 2.4
+    open_bottom: bool = True
+    bottom_rim_width: float = 6.0
+    roof_ribs: bool = True
+    roof_rib_height: float = 12.0      # down from roof (10–15mm good)
+    roof_rib_thickness: float = 0.0    # 0.0 => use wall_thickness
+
+
 
     # Plate parameters
     clearance: float = 0.2
