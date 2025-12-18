@@ -13,6 +13,9 @@ class Config:
     roof_ribs: bool = True
     roof_rib_height: float = 12.0      # down from roof (10–15mm good)
     roof_rib_thickness: float = 0.0    # 0.0 => use wall_thickness
+    roof_gusset_mm: float = 10.0
+
+
 
 
 
