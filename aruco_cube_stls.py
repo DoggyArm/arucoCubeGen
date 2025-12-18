@@ -26,6 +26,12 @@ MARKER_HEIGHT = 0.8        # mm height of raised "black" squares
 BEZEL_OVERHANG = 0.8       # mm how much the bezel overlaps beyond the slot opening on each side
 BEZEL_THICKNESS = 0.8      # mm thickness of the bezel (kept within plate thickness, not adding height)
 
+# Bezel ID text parameters
+BEZEL_TEXT_ENABLED = True
+BEZEL_TEXT_PREFIX = "ID "  # set to "" if you only want the number
+BEZEL_TEXT_HEIGHT_MM = 3.0 # target text height
+BEZEL_TEXT_DEPTH_MM = 0.5  # engraved depth; fallback emboss uses same value as height
+BEZEL_TEXT_FONT = None     # None = trimesh default; or set path/name if needed
 
 # IDs for plates
 PLATE_IDS = [0, 1, 2, 3, 4]  # adjust as you like
@@ -126,11 +132,18 @@ def create_plate_base(
     cube_edge=CUBE_EDGE,
     slot_fraction=SLOT_FRACTION,
     clearance=CLEARANCE,
-    slot_depth=SLOT_DEPTH
+    slot_depth=SLOT_DEPTH,
+    marker_margin_fraction=PLATE_MARGIN_FRACTION,
+    marker_bits=ARUCO_MARKER_BITS,
+    border_bits=ARUCO_BORDER_BITS,
+    bezel_overhang=BEZEL_OVERHANG,
+    bezel_thickness=BEZEL_THICKNESS,
+    text=None
 ):
     """
     Create a single plate base that fits into the recessed slot.
     Adds a thin top-face bezel (flange) that overlaps the slot seam.
+    Optionally engraves text into the bezel/quiet-zone area.
     Origin at (0,0,0), top at z = plate_thickness.
     """
     slot_size = cube_edge * slot_fraction
@@ -142,23 +155,113 @@ def create_plate_base(
     plate.apply_translation(np.array([plate_size / 2, plate_size / 2, plate_thickness / 2]))
 
     # --- Bezel flange that sits on the cube face and hides the seam ---
-    bezel_outer = slot_size + 2.0 * BEZEL_OVERHANG  # larger than slot opening
-    bezel_thickness = min(BEZEL_THICKNESS, plate_thickness)  # keep within plate thickness
+    bezel_outer = slot_size + 2.0 * bezel_overhang
+    bezel_t = min(bezel_thickness, plate_thickness)
 
-    bezel = trimesh.creation.box(extents=(bezel_outer, bezel_outer, bezel_thickness))
-
-    # Center bezel over the plate, and keep its TOP flush with plate top (z=plate_thickness)
+    bezel = trimesh.creation.box(extents=(bezel_outer, bezel_outer, bezel_t))
     bezel_center = np.array([
         plate_size / 2,
         plate_size / 2,
-        plate_thickness - bezel_thickness / 2
+        plate_thickness - bezel_t / 2
     ])
     bezel.apply_translation(bezel_center)
 
-    # Combine
-    plate_with_bezel = trimesh.util.concatenate([plate, bezel])
+    base = trimesh.util.concatenate([plate, bezel])
 
-    return plate_with_bezel, plate_size, plate_thickness
+    # --- Optional engraved text (placed in the quiet-zone band) ---
+    if text and BEZEL_TEXT_ENABLED:
+        try:
+            # Compute the white band height available (quiet zone band)
+            cells_per_side = marker_bits + 2 * border_bits
+            marker_area = plate_size * marker_margin_fraction
+            margin_mm = (plate_size - marker_area) / 2.0  # white band thickness per side
+
+            # Choose a text height that fits in the band
+            usable_band = max(0.0, margin_mm - 1.0)  # leave ~1mm breathing room
+            target_h = min(BEZEL_TEXT_HEIGHT_MM, usable_band)
+            target_h = max(1.5, target_h)  # don't go too tiny
+
+            # Create text mesh (extruded)
+            # NOTE: trimesh.creation.text signature supports (text, font=..., depth=..., font_size=...)
+            txt = trimesh.creation.text(
+                text=text,
+                font=BEZEL_TEXT_FONT,
+                depth=BEZEL_TEXT_DEPTH_MM,
+                font_size=10  # temporary; we scale below to target_h
+            )
+
+            # Scale text in XY so its Y-size becomes target_h
+            bounds = txt.bounds
+            txt_h = bounds[1][1] - bounds[0][1]
+            if txt_h <= 1e-6:
+                raise RuntimeError("Text mesh height too small.")
+
+            s = target_h / txt_h
+            txt.apply_scale([s, s, 1.0])
+
+            # Recompute bounds after scaling
+            b = txt.bounds
+            txt_w = b[1][0] - b[0][0]
+            txt_h2 = b[1][1] - b[0][1]
+
+            # Place it centered in the bottom quiet-zone band (below the marker area)
+            # Band spans y in [0, margin_mm]; center text in that region
+            cx = plate_size / 2.0
+            cy = margin_mm / 2.0
+
+            # Ensure it doesn't exceed plate edges; if it does, scale down
+            max_w = plate_size - 2.0  # keep ~1mm edge margin each side
+            if txt_w > max_w:
+                s2 = max_w / txt_w
+                txt.apply_scale([s2, s2, 1.0])
+                b = txt.bounds
+                txt_w = b[1][0] - b[0][0]
+                txt_h2 = b[1][1] - b[0][1]
+
+            # Move text so its center is at (cx, cy)
+            # Text mesh is centered around its own origin inconsistently; shift by its bounds center.
+            bx = (b[0][0] + b[1][0]) / 2.0
+            by = (b[0][1] + b[1][1]) / 2.0
+            bz = (b[0][2] + b[1][2]) / 2.0
+
+            # Put the text cutter *into* the top surface
+            cz = plate_thickness - BEZEL_TEXT_DEPTH_MM / 2.0
+
+            txt.apply_translation([cx - bx, cy - by, cz - bz])
+
+            # Engrave (boolean difference)
+            base = base.difference(txt)
+
+        except Exception as e:
+            # Fallback: shallow emboss on top (no boolean backend / text op issues)
+            try:
+                txt = trimesh.creation.text(
+                    text=text,
+                    font=BEZEL_TEXT_FONT,
+                    depth=BEZEL_TEXT_DEPTH_MM,
+                    font_size=10
+                )
+                b = txt.bounds
+                txt_h = b[1][1] - b[0][1]
+                s = max(1.5, min(BEZEL_TEXT_HEIGHT_MM, 3.0)) / max(txt_h, 1e-6)
+                txt.apply_scale([s, s, 1.0])
+                b = txt.bounds
+                bx = (b[0][0] + b[1][0]) / 2.0
+                by = (b[0][1] + b[1][1]) / 2.0
+                bz = (b[0][2] + b[1][2]) / 2.0
+
+                # Place embossed text slightly above top surface
+                txt.apply_translation([
+                    plate_size / 2.0 - bx,
+                    (plate_size * (1.0 - marker_margin_fraction) / 2.0) / 2.0 - by,
+                    plate_thickness + BEZEL_TEXT_DEPTH_MM / 2.0 - bz
+                ])
+                base = trimesh.util.concatenate([base, txt])
+            except:
+                pass
+
+    return base, plate_size, plate_thickness
+
 
 
 # =========================
@@ -263,17 +366,20 @@ def main():
     cube_mesh.export("cube_with_slots.stl")
     print("Saved: cube_with_slots.stl")
 
-    # 2) Plate base (reusable for all IDs)
+    # 2) Plate base template (no text) for reference
     print("Creating plate base template...")
-    plate_base_mesh, plate_size, plate_thickness = create_plate_base()
-    plate_base_mesh.export("plate_base.stl")
+    plate_base_template, plate_size, plate_thickness = create_plate_base(text=None)
+    plate_base_template.export("plate_base.stl")
     print("Saved: plate_base.stl")
 
-    # 3) For each ID, create marker mesh (and, optionally, base+marker union)
+    # 3) For each ID, create per-ID base (with text), marker mesh, and combined export
     for marker_id in PLATE_IDS:
         print(f"Creating ArUco plate for ID {marker_id}...")
 
-        # Base is same geometry; export per-ID if you like
+        # Per-ID base with engraved/embossed text in bezel
+        plate_text = f"{BEZEL_TEXT_PREFIX}{marker_id}" if BEZEL_TEXT_ENABLED else None
+        plate_base_mesh, _, _ = create_plate_base(text=plate_text)
+
         base_filename = f"plate_base_id{marker_id}.stl"
         plate_base_mesh.export(base_filename)
 
@@ -286,12 +392,13 @@ def main():
         marker_filename = f"plate_marker_id{marker_id}.stl"
         marker_mesh.export(marker_filename)
 
-        # Optional: union of base + markers into a single mesh
+        # Combined export (base + marker)
         combined = trimesh.util.concatenate([plate_base_mesh, marker_mesh])
         combined_filename = f"plate_combined_id{marker_id}.stl"
         combined.export(combined_filename)
 
         print(f"Saved: {base_filename}, {marker_filename}, {combined_filename}")
+
 
 
 if __name__ == "__main__":
