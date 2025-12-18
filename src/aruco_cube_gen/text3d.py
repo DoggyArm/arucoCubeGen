@@ -27,8 +27,8 @@ def _make_text_mesh_raster(
     target_height_mm: float,
     depth_mm: float,
     *,
-    desired_px_height: int = 64,
-    thickness: int = 2,
+    desired_px_height: int = 48,
+    thickness: int = 3,
 ) -> trimesh.Trimesh:
     """
     Rasterize with OpenCV Hershey font (always available) then extrude "ink" pixels.

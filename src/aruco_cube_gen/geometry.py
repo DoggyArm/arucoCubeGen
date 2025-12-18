@@ -153,7 +153,8 @@ def create_plate_base(cfg: Config, text: str | None):
 
             cx = plate_size / 2.0
             cy = margin_mm / 2.0
-            cz = plate_thickness + depth / 2.0
+            EMBED_MM = 0.25  # small overlap so slicers don't delete the text
+            cz = plate_thickness + depth / 2.0 - EMBED_MM
 
             txt.apply_translation([cx - bx, cy - by, cz - bz])
 
