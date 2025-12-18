@@ -16,11 +16,16 @@ SLOT_DEPTH = 3.0           # mm recess depth (also plate thickness)
 
 # Plate parameters
 CLEARANCE = 0.2            # mm clearance per side for plate in slot
-PLATE_MARGIN_FRACTION = 0.9  # fraction of plate width used by ArUco area
+PLATE_MARGIN_FRACTION = 0.88  # fraction of plate width used by ArUco area
 ARUCO_MARKER_BITS = 4      # 4x4 aruco markers
 ARUCO_BORDER_BITS = 1      # border cells around marker bits
 ARUCO_IMAGE_SIZE = 200     # pixels for marker generation
 MARKER_HEIGHT = 0.8        # mm height of raised "black" squares
+
+# Bezel (seam-hiding flange) parameters
+BEZEL_OVERHANG = 0.8       # mm how much the bezel overlaps beyond the slot opening on each side
+BEZEL_THICKNESS = 0.8      # mm thickness of the bezel (kept within plate thickness, not adding height)
+
 
 # IDs for plates
 PLATE_IDS = [0, 1, 2, 3, 4]  # adjust as you like
@@ -125,17 +130,35 @@ def create_plate_base(
 ):
     """
     Create a single plate base that fits into the recessed slot.
+    Adds a thin top-face bezel (flange) that overlaps the slot seam.
     Origin at (0,0,0), top at z = plate_thickness.
     """
     slot_size = cube_edge * slot_fraction
     plate_size = slot_size - 2 * clearance
     plate_thickness = slot_depth  # same as recess depth
 
+    # --- Main plug that fits into the slot ---
     plate = trimesh.creation.box(extents=(plate_size, plate_size, plate_thickness))
-    # Shift so bottom is at z = 0, x/y from 0..plate_size
     plate.apply_translation(np.array([plate_size / 2, plate_size / 2, plate_thickness / 2]))
 
-    return plate, plate_size, plate_thickness
+    # --- Bezel flange that sits on the cube face and hides the seam ---
+    bezel_outer = slot_size + 2.0 * BEZEL_OVERHANG  # larger than slot opening
+    bezel_thickness = min(BEZEL_THICKNESS, plate_thickness)  # keep within plate thickness
+
+    bezel = trimesh.creation.box(extents=(bezel_outer, bezel_outer, bezel_thickness))
+
+    # Center bezel over the plate, and keep its TOP flush with plate top (z=plate_thickness)
+    bezel_center = np.array([
+        plate_size / 2,
+        plate_size / 2,
+        plate_thickness - bezel_thickness / 2
+    ])
+    bezel.apply_translation(bezel_center)
+
+    # Combine
+    plate_with_bezel = trimesh.util.concatenate([plate, bezel])
+
+    return plate_with_bezel, plate_size, plate_thickness
 
 
 # =========================
@@ -151,11 +174,11 @@ def generate_aruco_image(marker_id, bits=ARUCO_MARKER_BITS, border_bits=ARUCO_BO
 
     # Newer OpenCV (>=4.7, some builds of 4.10)
     if hasattr(aruco, "generateImageMarker"):
-        img = aruco.generateImageMarker(dictionary, marker_id, image_size)
+        img = aruco.generateImageMarker(dictionary, marker_id, image_size, borderBits=border_bits)
 
     # Older OpenCV (<=4.6)
     elif hasattr(aruco, "drawMarker"):
-        img = aruco.drawMarker(dictionary, marker_id, image_size)
+        img = aruco.drawMarker(dictionary, marker_id, image_size, borderBits=border_bits)
 
     else:
         raise RuntimeError(
