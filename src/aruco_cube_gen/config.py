@@ -25,7 +25,7 @@ class Config:
     bezel_text_enabled: bool = True
     bezel_text_prefix: str = "ID "
     bezel_text_height_mm: float = 3.0
-    bezel_text_depth_mm: float = 0.8
+    bezel_text_depth_mm: float = 1.2
     bezel_text_font: Optional[str] = None
 
     # IDs

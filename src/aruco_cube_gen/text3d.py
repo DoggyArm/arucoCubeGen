@@ -28,7 +28,7 @@ def _make_text_mesh_raster(
     depth_mm: float,
     *,
     desired_px_height: int = 48,
-    thickness: int = 3,
+    thickness: int = 4,
 ) -> trimesh.Trimesh:
     """
     Rasterize with OpenCV Hershey font (always available) then extrude "ink" pixels.
@@ -56,13 +56,20 @@ def _make_text_mesh_raster(
     img = np.zeros((img_h, img_w), dtype=np.uint8)
 
     org = (pad, pad + h)  # baseline anchor
-    cv2.putText(img, text, org, font_face, scale, color=255, thickness=thickness, lineType=cv2.LINE_AA)
+    cv2.putText(img, text, org, font_face, scale, color=255, thickness=thickness, lineType=cv2.LINE_8)
 
     # Binarize
     _, bw = cv2.threshold(img, 32, 255, cv2.THRESH_BINARY)
 
     # Pixel size in mm based on desired height
     px_mm = target_height_mm / float(desired_px_height)
+
+    kernel = np.ones((3, 3), dtype=np.uint8)
+
+    # Close tiny gaps inside strokes, then slightly fatten strokes
+    bw = cv2.morphologyEx(bw, cv2.MORPH_CLOSE, kernel, iterations=1)
+    bw = cv2.dilate(bw, kernel, iterations=1)
+
 
     # Build boxes for contiguous runs in each row
     boxes = []
