@@ -1,0 +1,59 @@
+# =========================
+# Python cache only
+# =========================
+__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+
+# =========================
+# Generated 3D Assets
+# =========================
+*.stl
+*.3mf
+*.step
+*.obj
+*.amf
+*.gcode
+
+# Output folders (generated)
+out*/
+output*/
+exports*/
+
+# =========================
+# Bambu Studio / Slicer
+# =========================
+*.bambu
+*.bbproject
+*.bbprofile
+*.bgcode
+*.gcode.3mf
+*.cache
+
+# =========================
+# Renders / Media
+# =========================
+docs/renders/*.png
+docs/renders/*.jpg
+docs/renders/*.jpeg
+docs/renders/*.webp
+docs/renders/*.blend
+docs/renders/*.blend1
+
+# Keep folder structure
+!docs/renders/.gitkeep
+
+# =========================
+# OS files
+# =========================
+.DS_Store
+Thumbs.db
+
+# =========================
+# Temporary / Scratch
+# =========================
+tmp/
+temp/
+scratch/
+
