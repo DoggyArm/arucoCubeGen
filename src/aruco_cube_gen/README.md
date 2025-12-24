@@ -163,5 +163,61 @@ out_stls_YYYY-MM-DD_HH-MM-SS/
 
 ---
 
+## 🧭 Design Evolution & Lessons Learned
+
+This project went through several geometry iterations driven by **actual slicer layer inspection**, not theory.
+
+### 1. Flat internal roof + bridge tricks (rejected)
+- Long internal bridges *can* print, but slicers introduce:
+  - inconsistent anchoring
+  - unpredictable bridge ordering
+  - sudden unsupported paths
+- Result: visually acceptable in previews, unreliable in real prints.
+
+**Lesson:** slicer heuristics are not guarantees.
+
+---
+
+### 2. Attic roofs, corbels, stepped supports (rejected)
+- Slopes and corbels reduced bridge length, but:
+  - introduced asymmetry between faces
+  - caused sudden geometry “pop-in” at specific layers
+  - still produced floating cantilevers at corners
+
+**Lesson:** partial support is worse than continuous support.
+
+---
+
+### 3. Open top with miter-only seating (kept)
+- Top slot made **identical to side slots**
+- Flat slot floor removed
+- Plate seats purely on the **45° mitered walls**
+
+**Lesson:** flat ledges are not required for plate seating.
+
+---
+
+### 4. Continuous 45° perimeter ramp (final)
+- Added **material only below the top slot floor**
+- Ramp starts lower and moves inward gradually
+- No layer ever introduces a new unsupported perimeter
+
+**Lesson:**  
+> If a feature appears suddenly at one layer, it will fail.  
+> If it grows gradually, slicers behave predictably.
+
+---
+
+### Final Principle
+> **Design for layer continuity, not just static geometry.**
+
+Every successful feature in this model:
+- either grows gradually layer-to-layer  
+- or is fully supported by the layer below  
+
+This single principle eliminated all “floating cantilever” failures.
+
+---
+
 ## 📜 License
 MIT License

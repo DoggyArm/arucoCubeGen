@@ -65,6 +65,7 @@ class Config:
 
     # IDs
     plate_ids: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
+    #plate_ids: List[int] = field(default_factory=lambda: [5, 6, 7, 8, 9])
 
     # ArUco dictionary
     aruco_dict_name: str = "DICT_4X4_50"
