@@ -35,10 +35,9 @@ class Config:
     # Safety margin on the through-opening (keeps sloped walls intact)
     top_open_inner_margin_mm: float = 0.0  # try 0.0; bump to 0.2 if slicer shows artifacts
 
-    # Additive-only support ramp BELOW the top slot floor (does not change anything above).
-    # Creates a continuous 45° perimeter ramp from inner walls up to the inner edge of the slot-floor opening.
+    # Additive-only support ramps BELOW the top slot floor (does not change anything above).
+    # Creates a 45° ramp from inner walls up to the inner edge of the slot-floor opening.
     top_support_ramps_enabled: bool = True
-    top_ramp_start_inset_mm: float = 0.4  # thickness of the first ramp \"step\" at the start height
 
     # -------------------------
     # Plate parameters
@@ -53,8 +52,9 @@ class Config:
     marker_height: float = 0.8
 
     # Bezel (flange)
-    bezel_overhang: float = 0.8
-    bezel_thickness: float = 0.8
+    # Deprecated: bezel flange removed (to avoid floating cantilevers). Kept for backward compatibility.
+    bezel_overhang: float = 0.0
+    bezel_thickness: float = 0.0
 
     # Optional bezel text
     bezel_text_enabled: bool = True
@@ -64,8 +64,8 @@ class Config:
     bezel_text_font: Optional[str] = None
 
     # IDs
-    plate_ids: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
-    #plate_ids: List[int] = field(default_factory=lambda: [5, 6, 7, 8, 9])
+    #plate_ids: List[int] = field(default_factory=lambda: [0, 1, 2, 3, 4])
+    plate_ids: List[int] = field(default_factory=lambda: [5, 6, 7, 8, 9])
 
     # ArUco dictionary
     aruco_dict_name: str = "DICT_4X4_50"

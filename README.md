@@ -10,11 +10,12 @@ This project is intentionally **simple and hackable** — no GUI, no over-engine
 
 ## 🚀 What This Version Is Optimized For
 
-This iteration focuses on **print reliability first**, especially for large hollow geometry:
+This iteration focuses on **print reliability first**, especially for large hollow geometry and mating parts:
 
 - **No internal roof panel**
 - **No long internal bridges**
 - **No sudden floating cantilevers**
+- **No decorative overhangs**
 - **Predictable, slicer-friendly layer progression**
 
 All geometry changes are driven by **actual slicer layer analysis**, not heuristics.
@@ -38,9 +39,9 @@ All geometry changes are driven by **actual slicer layer analysis**, not heurist
 ## 🔺 Open Top Design (Important)
 
 ### ❌ What was removed
-- No flat internal roof
-- No attic roof
-- No internal bridge tricks
+- Flat internal roof
+- Attic roofs / corbels
+- Internal bridge tricks
 
 These approaches caused **unavoidable slicer artifacts** and **sudden unsupported extrusion paths**.
 
@@ -53,22 +54,24 @@ The top is therefore **open**, but still fully functional.
 
 ---
 
-## 🧱 Top Slot Seating Strategy
+## 🧱 Slot Seating Strategy (Cube)
 
-The top face works exactly like the side faces:
+All faces — including the top — use the **same slot geometry**:
 
 - Same **slot size**
 - Same **slot depth**
 - Same **45° mitered (tapered) slot walls**
 
-### Plate seating
-- The ArUco plate **does NOT sit on a flat ledge**
-- It seats **entirely on the 45° mitered walls**
-- This is mechanically stable and print-robust
+There are **no flat ledges** anywhere in the slot system.
+
+### Why this works
+- Plates seat on the **mitered walls only**
+- Contact is self-centering and mechanically stable
+- Flat ledges are not required for alignment or retention
 
 ---
 
-## 🛠 Internal 45° Perimeter Support Ramp
+## 🛠 Internal 45° Perimeter Support Ramp (Cube)
 
 To avoid sudden **floating cantilevers**, the cube includes a **continuous internal perimeter ramp**:
 
@@ -89,30 +92,38 @@ The ramp:
 
 ---
 
-## 🧩 Slot System
+## 🧩 ArUco Plate Generator
 
-- All slots use **tapered (mitered) walls**
-- Eliminates 90° internal overhangs
-- Improves slot quality on vertical faces
+### Plate Geometry (Updated)
+Plates are now **pure mitered plugs**:
 
-> ⚠️ Changing slot taper requires reprinting plates.
+- **No bezel / flange**
+- **No horizontal overhangs**
+- **No decorative geometry**
+
+Each plate:
+- Matches the cube slot **exactly**
+- Seats **only on the 45° mitered walls**
+- Sits flush inside the recess
+
+This mirrors the cube design philosophy and eliminates all plate-side cantilevers.
 
 ---
 
-## 🧩 ArUco Plate Generator
-
+### Marker Geometry
 - **4×4 ArUco markers** (`DICT_4X4_50`, `borderBits = 1`)
 - **2.4 mm thick plug**
 - **0.8 mm raised black cells** for AMS two-color printing
-- **Integrated bezel (flange)**:
-  - Overlaps the slot opening
-  - Hides seam and shadow lines
-  - Improves visual contrast
-  - Allows **face-up printing** (matte surface)
 
-### Optional Plate ID Text
-- Embossed ID in the white quiet zone
-- Slicer-safe geometry
+---
+
+### Plate ID Text (Revised)
+- Optional ID text is placed **directly on the plug face**
+- Slightly embedded to avoid coplanar faces
+- Constrained to the **quiet zone**
+- Fully supported on every layer
+
+No text geometry prints in mid-air.
 
 ---
 
@@ -120,7 +131,8 @@ The ramp:
 
 - RGB resolution: **1280 px**
 - Horizontal FOV: **~86°**
-- Target: ≥ **8 px per marker cell** at **1.5 m**
+- Marker grid: **6×6 cells** (4×4 data + border)
+- Target: ≥ **8 px per cell** at **1.5 m**
 
 Slot and marker sizing exceed this threshold with margin.
 
@@ -157,7 +169,7 @@ out_stls_YYYY-MM-DD_HH-MM-SS/
 ## 🧱 Assembly
 
 1. Press-fit plates into the recesses
-2. Bezel hides seam and shadow lines
+2. Plates sit flush on the mitered walls
 3. Optional tiny CA glue dot on **back corners only**
 4. Use cube with the **open face down**
 
@@ -167,40 +179,38 @@ out_stls_YYYY-MM-DD_HH-MM-SS/
 
 This project went through several geometry iterations driven by **actual slicer layer inspection**, not theory.
 
-### 1. Flat internal roof + bridge tricks (rejected)
-- Long internal bridges *can* print, but slicers introduce:
-  - inconsistent anchoring
-  - unpredictable bridge ordering
+### 1. Flat internal roofs and bridges (rejected)
+- Long bridges *sometimes* print, but slicers introduce:
+  - unpredictable anchoring
+  - bridge ordering artifacts
   - sudden unsupported paths
-- Result: visually acceptable in previews, unreliable in real prints.
 
 **Lesson:** slicer heuristics are not guarantees.
 
 ---
 
 ### 2. Attic roofs, corbels, stepped supports (rejected)
-- Slopes and corbels reduced bridge length, but:
-  - introduced asymmetry between faces
-  - caused sudden geometry “pop-in” at specific layers
+- Reduced bridge span but:
+  - caused geometry “pop-in” at specific layers
   - still produced floating cantilevers at corners
 
 **Lesson:** partial support is worse than continuous support.
 
 ---
 
-### 3. Open top with miter-only seating (kept)
-- Top slot made **identical to side slots**
-- Flat slot floor removed
-- Plate seats purely on the **45° mitered walls**
+### 3. Miter-only seating (kept)
+- Slots made identical on all faces
+- Flat ledges removed
+- Both cube and plates seat on **45° mitered walls only**
 
-**Lesson:** flat ledges are not required for plate seating.
+**Lesson:** flat ledges are unnecessary and harmful for print reliability.
 
 ---
 
 ### 4. Continuous 45° perimeter ramp (final)
 - Added **material only below the top slot floor**
-- Ramp starts lower and moves inward gradually
-- No layer ever introduces a new unsupported perimeter
+- Ramp grows inward gradually, layer by layer
+- No layer introduces a new unsupported perimeter
 
 **Lesson:**  
 > If a feature appears suddenly at one layer, it will fail.  
@@ -209,13 +219,13 @@ This project went through several geometry iterations driven by **actual slicer 
 ---
 
 ### Final Principle
-> **Design for layer continuity, not just static geometry.**
+> **Design for layer continuity, not static geometry.**
 
 Every successful feature in this model:
 - either grows gradually layer-to-layer  
 - or is fully supported by the layer below  
 
-This single principle eliminated all “floating cantilever” failures.
+This principle eliminated all “floating cantilever” failures.
 
 ---
 

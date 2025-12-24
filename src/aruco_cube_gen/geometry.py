@@ -225,8 +225,8 @@ def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
         )
         thru = _sanitize(thru, "top_open_through_cut")
         shell = _bool_difference(shell, thru, what="opening top by removing slot floor only")
-        # Additive-only: continuous perimeter ramp below the slot floor (no changes above)
-        shell = _add_top_support_ramp_perimeter(shell, cfg)
+        # Additive-only: ramps below the slot floor (no changes above)
+        shell = _add_top_support_ramps_below_floor(shell, cfg)
 
     # +X slot
     posx_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="x", open_positive=True)
@@ -275,37 +275,25 @@ def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
 
 
 # -------------------------
-# Additive support ramp BELOW top slot floor (continuous perimeter, no changes above)
+# Additive support ramps BELOW top slot floor (no changes above)
 # -------------------------
 
-def _add_top_support_ramp_perimeter(shell: trimesh.Trimesh, cfg: Config) -> trimesh.Trimesh:
+def _add_top_support_ramps_below_floor(shell: trimesh.Trimesh, cfg: Config) -> trimesh.Trimesh:
     """
-    ADD (union) a single continuous 45° perimeter ramp *below* the top slot floor.
+    ADD (union) four continuous 45° ramps *below* the top slot floor.
 
-    Requirement (per your recipe):
+    Constraint:
       - Do not change anything above the slot floor plane (z_floor).
       - Only add material at z <= z_floor.
-      - Ramp starts lower, and each higher layer extends inward, reaching the inner edge of the
-        slot-floor opening exactly at z_floor (i.e., a gradual 45° ramp, not a sudden ledge).
 
     Geometry:
-      z_floor = cube_edge/2 - slot_depth
-      inner_open = slot_size - 2*slot_miter_mm  (innermost opening at the slot floor)
-      inner_span = cube_edge - 2*wall_thickness (between inner walls)
-      dist = (inner_span - inner_open)/2
+      - z_floor = cube_edge/2 - slot_depth
+      - inner_open = slot_size - 2*slot_miter_mm  (inner opening at slot floor)
+      - inner_span = cube_edge - 2*wall_thickness (distance between inner walls)
+      - dist = (inner_span - inner_open)/2
+      - 45° ramp: vertical drop == dist from z_floor down to (z_floor - dist) at the inner wall.
 
-    For a 45° ramp:
-      ramp_height = dist
-      z_start = z_floor - dist
-
-    We construct:
-      outer_block: (inner_span x inner_span x ramp_height)
-      inner_frustum_cut: bottom opening slightly smaller than inner_span (by start_inset),
-                         top opening equals inner_open
-      ramp = outer_block - inner_frustum_cut
-
-    This produces a continuous sloped inner surface around the whole perimeter (no corner islands),
-    eliminating the sudden “floating cantilever” onset.
+    The ramps run from each inner wall (+Y, -Y, +X, -X) up to the inner edge of the top opening.
     """
     if not getattr(cfg, "top_support_ramps_enabled", True):
         return shell
@@ -324,48 +312,90 @@ def _add_top_support_ramp_perimeter(shell: trimesh.Trimesh, cfg: Config) -> trim
         return shell
 
     dist = (inner_span - inner_open) / 2.0
-    if dist <= 0.8:
+    if dist <= 0.6:
         return shell
 
-    # Slot floor plane
     z_floor = ce / 2.0 - d
+    z_wall = z_floor - dist
 
-    ramp_h = dist  # 45°: rise == run
-    z_center = z_floor - ramp_h / 2.0
+    # Coordinates
+    x0 = -inner_open / 2.0
+    x1 = +inner_open / 2.0
+    y0 = -inner_open / 2.0
+    y1 = +inner_open / 2.0
+    XW = inner_span / 2.0
+    YW = inner_span / 2.0
 
-    start_inset = float(getattr(cfg, "top_ramp_start_inset_mm", 0.4))
-    start_inset = max(0.2, min(start_inset, dist * 0.8))
+    # Give the solid a tiny thickness in Z to avoid zero-volume degeneracy.
+    eps = 0.02
 
-    # Outer block fills full interior span for the ramp height
-    outer_block = make_box(
-        extents=(inner_span, inner_span, ramp_h),
-        center=[0.0, 0.0, z_center],
-    )
-    outer_block = _sanitize(outer_block, "top_ramp_outer_block")
+    def wedge_y(sign: int) -> trimesh.Trimesh:
+        # Ramp spans x in [x0,x1], y from inner opening edge to inner wall.
+        if sign > 0:
+            y_near, y_wall = y1, +YW
+        else:
+            y_near, y_wall = y0, -YW
 
-    # Inner frustum cut: bottom opening close to inner_span, top opening == inner_open
-    bottom_open = max(1.0, inner_span - 2.0 * start_inset)
-    top_open = max(1.0, inner_open)
+        verts = np.array([
+            [x0, y_near, z_floor],
+            [x1, y_near, z_floor],
+            [x1, y_wall, z_wall],
+            [x0, y_wall, z_wall],
 
-    # taper needed so that (bottom_open - 2*taper_needed) == top_open
-    taper_needed = max(0.0, (bottom_open - top_open) / 2.0)
+            [x0, y_near, z_floor - eps],
+            [x1, y_near, z_floor - eps],
+            [x1, y_wall, z_wall - eps],
+            [x0, y_wall, z_wall - eps],
+        ], dtype=float)
 
-    inner_cut = make_tapered_prism(
-        depth=ramp_h,
-        size_open_a=bottom_open,
-        size_open_b=bottom_open,
-        taper_mm=taper_needed,
-        axis="z",
-        open_positive=False,  # opening on -Z (bottom), smaller at +Z (top)
-    )
-    inner_cut.apply_translation([0.0, 0.0, z_center])
-    inner_cut = _sanitize(inner_cut, "top_ramp_inner_frustum_cut")
+        faces = np.array([
+            [0, 1, 2], [0, 2, 3],      # top sloped surface (ends exactly at z_floor)
+            [4, 6, 5], [4, 7, 6],      # bottom (reverse winding)
 
-    ramp_ring = _bool_difference(outer_block, inner_cut, what="creating top perimeter ramp ring")
-    ramp_ring = _sanitize(ramp_ring, "top_perimeter_ramp_ring")
+            [0, 4, 5], [0, 5, 1],      # near cap
+            [1, 5, 6], [1, 6, 2],      # side
+            [2, 6, 7], [2, 7, 3],      # wall cap
+            [3, 7, 4], [3, 4, 0],      # side
+        ], dtype=int)
 
-    # Union only (additive)
-    return _bool_union(shell, ramp_ring, what="adding top perimeter ramp ring")
+        return _sanitize(trimesh.Trimesh(vertices=verts, faces=faces, process=False), f"top_ramp_y_{sign}")
+
+    def wedge_x(sign: int) -> trimesh.Trimesh:
+        # Ramp spans y in [y0,y1], x from inner opening edge to inner wall.
+        if sign > 0:
+            x_near, x_wall = x1, +XW
+        else:
+            x_near, x_wall = x0, -XW
+
+        verts = np.array([
+            [x_near, y0, z_floor],
+            [x_near, y1, z_floor],
+            [x_wall, y1, z_wall],
+            [x_wall, y0, z_wall],
+
+            [x_near, y0, z_floor - eps],
+            [x_near, y1, z_floor - eps],
+            [x_wall, y1, z_wall - eps],
+            [x_wall, y0, z_wall - eps],
+        ], dtype=float)
+
+        faces = np.array([
+            [0, 1, 2], [0, 2, 3],
+            [4, 6, 5], [4, 7, 6],
+            [0, 4, 5], [0, 5, 1],
+            [1, 5, 6], [1, 6, 2],
+            [2, 6, 7], [2, 7, 3],
+            [3, 7, 4], [3, 4, 0],
+        ], dtype=int)
+
+        return _sanitize(trimesh.Trimesh(vertices=verts, faces=faces, process=False), f"top_ramp_x_{sign}")
+
+    out = shell
+    for solid in [wedge_y(+1), wedge_y(-1), wedge_x(+1), wedge_x(-1)]:
+        # Union only: additive. Does not remove or alter existing geometry.
+        out = _bool_union(out, solid, what="adding top support ramp below floor")
+
+    return out
 
 
 # -------------------------
@@ -403,15 +433,8 @@ def create_plate_base(cfg: Config, text: str | None):
 
     plate_size = plate_open
     plate_thickness = d
-
-    # Bezel flange (sits on cube face)
-    bezel_outer = slot_size + 2.0 * float(cfg.bezel_overhang)
-    bezel_t = min(float(cfg.bezel_thickness), plate_thickness)
-
-    bezel = trimesh.creation.box(extents=(bezel_outer, bezel_outer, bezel_t))
-    bezel.apply_translation([plate_size / 2.0, plate_size / 2.0, plate_thickness - bezel_t / 2.0])
-
-    base = trimesh.util.concatenate([plug, bezel])
+    # No bezel flange (removed to eliminate floating cantilevers)
+    base = plug
 
     # Optional embossed ID text in bottom quiet band
     if text and getattr(cfg, "bezel_text_enabled", False):
@@ -451,10 +474,17 @@ def create_plate_base(cfg: Config, text: str | None):
             bz = (tb[0][2] + tb[1][2]) / 2.0
 
             cx = plate_size / 2.0
-            cy = margin_mm / 2.0
-            EMBED_MM = 0.5
-            cz = plate_thickness + depth / 2.0 - EMBED_MM
+            # Place text fully on the TOP face of the plug (no bezel band).
+            # Keep it within the bottom quiet-zone and away from edges.
+            pad = 0.8
+            cy_min = target_h / 2.0 + pad
+            cy_max = max(cy_min, margin_mm - target_h / 2.0 - pad)
+            cy = min(margin_mm / 2.0, cy_max)
+            cy = max(cy, cy_min)
 
+            # Slight embed prevents slicers from dropping the text due to coplanar faces.
+            EMBED_MM = 0.4
+            cz = plate_thickness + depth / 2.0 - EMBED_MM
             txt.apply_translation([cx - bx, cy - by, cz - bz])
             base = trimesh.util.concatenate([base, txt])
 
