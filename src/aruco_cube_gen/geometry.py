@@ -1,17 +1,17 @@
 """
 geometry.py
 
-Mesh construction for:
-- Hollow cube with recessed slots (requires trimesh boolean backend)
-- Slot-fit plate base with bezel + optional embossed ID text
+Cube:
+- Hollow cube shell with 5 face slots (top, ±X, ±Y)
+- Slots are tapered/mitered via slot_miter_mm (same on all faces)
+- TOP follows the recipe:
+  1) Build top slot exactly like a side-wall slot (same cutter)
+  2) Remove only the flat slot floor inside the mitered edge, creating an opening into the cube
+     while keeping the mitered/tapered walls as the seating surface.
+  This avoids "printing in air" because the seating surface is a continuous slope.
 
-This iteration:
-- Slots are tapered (miter/draft) on ALL four side edges (printing-friendly)
-- Plates are tapered to match (print new plates if you changed taper)
-- Roof thickener (+cfg.roof_extra_thickness_mm) adds material from inside
-- Shallow attic roof reduces long bridging and stiffens roof
-- IMPORTANT FIX: attic/slab solids are trimmed with a TOP-SLOT keepout volume
-  so the top slot surface stays planar/flat and isn't "re-added" by unions.
+Plates:
+- create_plate_base kept intact: plug + bezel base, tapered to match slot taper, optional ID text.
 
 All dimensions are in millimeters.
 """
@@ -26,7 +26,7 @@ from .text3d import make_text_mesh
 
 
 # -------------------------
-# Basic helpers
+# Helpers
 # -------------------------
 
 def make_box(extents, center) -> trimesh.Trimesh:
@@ -58,12 +58,7 @@ def _bool_union(a: trimesh.Trimesh, b: trimesh.Trimesh, what: str) -> trimesh.Tr
 
 
 def _sanitize(mesh: trimesh.Trimesh, name: str) -> trimesh.Trimesh:
-    """
-    Try to make a mesh more boolean-friendly.
-    This does NOT guarantee is_volume=True, but helps with custom meshes.
-    """
     m = mesh.copy()
-
     try:
         m.remove_duplicate_faces()
     except Exception:
@@ -84,17 +79,15 @@ def _sanitize(mesh: trimesh.Trimesh, name: str) -> trimesh.Trimesh:
         m.fill_holes()
     except Exception:
         pass
-
     try:
         m.process(validate=False)
     except Exception:
         pass
-
     return m
 
 
 # -------------------------
-# Tapered prism (frustum) generator
+# Tapered prism (frustum)
 # -------------------------
 
 def make_tapered_prism(
@@ -115,10 +108,6 @@ def make_tapered_prism(
       (size_open_a - 2*taper_mm) x (size_open_b - 2*taper_mm)
 
     For a true 45° miter: taper_mm == depth.
-
-    axis: 'x' (depth along x), 'y', 'z'
-    open_positive: opening face is on +axis side if True, else on -axis side
-
     Returns mesh centered at origin.
     """
     d = float(depth)
@@ -126,7 +115,6 @@ def make_tapered_prism(
     b0 = float(size_open_b)
     t = float(taper_mm)
 
-    # Prevent inverted/degenerate shapes
     a1 = max(0.8, a0 - 2.0 * t)
     b1 = max(0.8, b0 - 2.0 * t)
 
@@ -195,142 +183,85 @@ def make_tapered_prism(
 
 
 # -------------------------
-# Internal roof thickener + attic (ADD material)
-# with TOP SLOT KEEPOUT FIX
-# -------------------------
-
-def add_roof_thickener_and_attic(shell: trimesh.Trimesh, cfg: Config) -> trimesh.Trimesh:
-    """
-    Adds material to the INSIDE of the cube:
-    - roof thickener slab (+cfg.roof_extra_thickness_mm)
-    - attic slopes along all 4 interior walls
-
-    FIX: trims those additive solids with a top-slot keepout volume so the
-    slot cavity stays planar and doesn't get "re-added" by unions.
-    """
-    ce = cfg.cube_edge
-    wt = cfg.wall_thickness
-    inner_span = ce - 2 * wt
-    if inner_span <= 0:
-        return shell
-
-    roof_inner_z = ce / 2 - wt
-
-    extra_t = float(getattr(cfg, "roof_extra_thickness_mm", 0.0))
-    attic_drop = float(getattr(cfg, "attic_drop_mm", 0.0))
-    attic_margin = float(getattr(cfg, "attic_margin_mm", 0.5))
-
-    out = shell
-
-    # --- Top slot keepout (protect slot cavity from attic/slab unions) ---
-    slot_size = ce * cfg.slot_fraction
-    d = cfg.slot_depth
-    keepout_margin = float(getattr(cfg, "attic_keepout_margin_mm", 1.0))
-    keepout_xy = slot_size + 2.0 * keepout_margin
-
-    keepout = make_box(
-        extents=(keepout_xy, keepout_xy, d + 0.6),
-        center=[0.0, 0.0, ce / 2 - d / 2],
-    )
-    keepout = _sanitize(keepout, "top_slot_keepout")
-
-    # 1) Roof thickener
-    if extra_t > 1e-6:
-        slab = make_box(
-            extents=(inner_span, inner_span, extra_t),
-            center=[0.0, 0.0, roof_inner_z - extra_t / 2],
-        )
-        slab = _sanitize(slab, "roof_thickener_slab")
-        slab = _bool_difference(slab, keepout, what="trimming roof slab away from top slot")
-        out = _bool_union(out, slab, what="adding roof thickener slab")
-
-    # 2) Attic slopes
-    if attic_drop > 1e-6:
-        run = inner_span / 2.0 + attic_margin
-        run = max(1.0, min(run, inner_span))
-        theta = np.arctan2(attic_drop, run)
-
-        def ramp_y(sign: int) -> trimesh.Trimesh:
-            r = trimesh.creation.box(extents=(inner_span, run, attic_drop))
-            ang = -theta if sign > 0 else +theta
-            r.apply_transform(trimesh.transformations.rotation_matrix(ang, [1, 0, 0]))
-            y = sign * (inner_span / 2 - run / 2)
-            z = roof_inner_z - attic_drop / 2
-            r.apply_translation([0.0, y, z])
-            return _sanitize(r, f"attic_ramp_y_{sign}")
-
-        def ramp_x(sign: int) -> trimesh.Trimesh:
-            r = trimesh.creation.box(extents=(run, inner_span, attic_drop))
-            ang = +theta if sign > 0 else -theta
-            r.apply_transform(trimesh.transformations.rotation_matrix(ang, [0, 1, 0]))
-            x = sign * (inner_span / 2 - run / 2)
-            z = roof_inner_z - attic_drop / 2
-            r.apply_translation([x, 0.0, z])
-            return _sanitize(r, f"attic_ramp_x_{sign}")
-
-        for solid in [ramp_y(+1), ramp_y(-1), ramp_x(+1), ramp_x(-1)]:
-            solid = _bool_difference(solid, keepout, what="trimming attic slope away from top slot")
-            out = _bool_union(out, solid, what="adding attic slope")
-
-    return out
-
-
-# -------------------------
 # Cube
 # -------------------------
 
 def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
-    ce = cfg.cube_edge
-    wt = cfg.wall_thickness
+    ce = float(cfg.cube_edge)
+    wt = float(cfg.wall_thickness)
 
     outer = trimesh.creation.box(extents=(ce, ce, ce))
-    inner = trimesh.creation.box(extents=(ce - 2 * wt, ce - 2 * wt, ce - 2 * wt))
+    inner = trimesh.creation.box(extents=(ce - 2.0 * wt, ce - 2.0 * wt, ce - 2.0 * wt))
     shell = _bool_difference(outer, inner, what="hollowing cube")
 
-    slot_size = ce * cfg.slot_fraction
-    d = cfg.slot_depth
+    slot_size = ce * float(cfg.slot_fraction)
+    d = float(cfg.slot_depth)
 
-    taper = float(getattr(cfg, "slot_miter_mm", d))
+    taper = float(getattr(cfg, "slot_miter_mm", 0.0))
     taper = max(0.0, min(taper, d))
 
-    # --- Slot cutters (tapered), SEQUENTIAL differences ---
+    # --- Slots (tapered), SEQUENTIAL differences ---
+
+    # Top slot: identical cutter to side wall slot geometry
     top_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="z", open_positive=True)
-    top_slot.apply_translation([0.0, 0.0, ce / 2 - d / 2])
-    shell = _bool_difference(shell, top_slot, what="cutting top tapered slot")
+    top_slot.apply_translation([0.0, 0.0, ce / 2.0 - d / 2.0])
+    shell = _bool_difference(shell, top_slot, what="cutting top slot")
 
+    # Recipe step: remove ONLY the flat slot floor inside the mitered edge (make top open)
+    if getattr(cfg, "top_open_remove_floor", False):
+        inner_open = slot_size - 2.0 * taper
+        inner_open = max(1.0, inner_open - 2.0 * float(getattr(cfg, "top_open_inner_margin_mm", 0.0)))
+
+        # We cut from the slot floor plane downward into the cube interior.
+        z_floor = ce / 2.0 - d
+        height = (z_floor - (-ce / 2.0 + wt)) + 0.8  # reach into interior
+        height = max(1.0, min(height, ce))
+
+        z_center = (-ce / 2.0 + wt + z_floor) / 2.0
+
+        thru = make_box(
+            extents=(inner_open, inner_open, height),
+            center=[0.0, 0.0, z_center],
+        )
+        thru = _sanitize(thru, "top_open_through_cut")
+        shell = _bool_difference(shell, thru, what="opening top by removing slot floor only")
+        # Additive-only: continuous perimeter ramp below the slot floor (no changes above)
+        shell = _add_top_support_ramp_perimeter(shell, cfg)
+
+    # +X slot
     posx_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="x", open_positive=True)
-    posx_slot.apply_translation([ce / 2 - d / 2, 0.0, 0.0])
-    shell = _bool_difference(shell, posx_slot, what="cutting +X tapered slot")
+    posx_slot.apply_translation([ce / 2.0 - d / 2.0, 0.0, 0.0])
+    shell = _bool_difference(shell, posx_slot, what="cutting +X slot")
 
+    # -X slot
     negx_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="x", open_positive=False)
-    negx_slot.apply_translation([-ce / 2 + d / 2, 0.0, 0.0])
-    shell = _bool_difference(shell, negx_slot, what="cutting -X tapered slot")
+    negx_slot.apply_translation([-ce / 2.0 + d / 2.0, 0.0, 0.0])
+    shell = _bool_difference(shell, negx_slot, what="cutting -X slot")
 
+    # +Y slot
     posy_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="y", open_positive=True)
-    posy_slot.apply_translation([0.0, ce / 2 - d / 2, 0.0])
-    shell = _bool_difference(shell, posy_slot, what="cutting +Y tapered slot")
+    posy_slot.apply_translation([0.0, ce / 2.0 - d / 2.0, 0.0])
+    shell = _bool_difference(shell, posy_slot, what="cutting +Y slot")
 
+    # -Y slot
     negy_slot = make_tapered_prism(d, slot_size, slot_size, taper, axis="y", open_positive=False)
-    negy_slot.apply_translation([0.0, -ce / 2 + d / 2, 0.0])
-    shell = _bool_difference(shell, negy_slot, what="cutting -Y tapered slot")
+    negy_slot.apply_translation([0.0, -ce / 2.0 + d / 2.0, 0.0])
+    shell = _bool_difference(shell, negy_slot, what="cutting -Y slot")
 
-    # Optional: open bottom, leaving a rim
+    # Open bottom, leaving a rim
     if getattr(cfg, "open_bottom", False):
-        rim_w = cfg.bottom_rim_width if getattr(cfg, "bottom_rim_width", 0.0) > 0 else wt
-        inner_xy = ce - 2 * rim_w
+        rim_w = float(getattr(cfg, "bottom_rim_width", wt))
+        rim_w = rim_w if rim_w > 0 else wt
+        inner_xy = ce - 2.0 * rim_w
         if inner_xy <= 0:
             raise ValueError(f"bottom_rim_width too large ({rim_w}); must be < {ce/2}")
 
-        floor_t = wt
         cut = make_box(
-            extents=(inner_xy, inner_xy, floor_t + 0.4),
-            center=[0.0, 0.0, -ce / 2 + (floor_t + 0.4) / 2],
+            extents=(inner_xy, inner_xy, wt + 0.6),
+            center=[0.0, 0.0, -ce / 2.0 + (wt + 0.6) / 2.0],
         )
         cut = _sanitize(cut, "bottom_open_cut")
         shell = _bool_difference(shell, cut, what="opening bottom interior panel")
-
-    # Add roof thickener + attic roof (ADD material)
-    shell = add_roof_thickener_and_attic(shell, cfg)
 
     # Cleanup helps slicers
     try:
@@ -339,38 +270,120 @@ def create_cube_with_slots(cfg: Config) -> trimesh.Trimesh:
         shell.process(validate=False)
 
     # Move cube so bottom rests on z=0
-    min_z = shell.bounds[0][2]
-    shell.apply_translation([0.0, 0.0, -min_z])
-
+    shell.apply_translation([0.0, 0.0, -shell.bounds[0][2]])
     return shell
 
 
 # -------------------------
-# Plate base (matching taper)
+# Additive support ramp BELOW top slot floor (continuous perimeter, no changes above)
+# -------------------------
+
+def _add_top_support_ramp_perimeter(shell: trimesh.Trimesh, cfg: Config) -> trimesh.Trimesh:
+    """
+    ADD (union) a single continuous 45° perimeter ramp *below* the top slot floor.
+
+    Requirement (per your recipe):
+      - Do not change anything above the slot floor plane (z_floor).
+      - Only add material at z <= z_floor.
+      - Ramp starts lower, and each higher layer extends inward, reaching the inner edge of the
+        slot-floor opening exactly at z_floor (i.e., a gradual 45° ramp, not a sudden ledge).
+
+    Geometry:
+      z_floor = cube_edge/2 - slot_depth
+      inner_open = slot_size - 2*slot_miter_mm  (innermost opening at the slot floor)
+      inner_span = cube_edge - 2*wall_thickness (between inner walls)
+      dist = (inner_span - inner_open)/2
+
+    For a 45° ramp:
+      ramp_height = dist
+      z_start = z_floor - dist
+
+    We construct:
+      outer_block: (inner_span x inner_span x ramp_height)
+      inner_frustum_cut: bottom opening slightly smaller than inner_span (by start_inset),
+                         top opening equals inner_open
+      ramp = outer_block - inner_frustum_cut
+
+    This produces a continuous sloped inner surface around the whole perimeter (no corner islands),
+    eliminating the sudden “floating cantilever” onset.
+    """
+    if not getattr(cfg, "top_support_ramps_enabled", True):
+        return shell
+
+    ce = float(cfg.cube_edge)
+    wt = float(cfg.wall_thickness)
+    d = float(cfg.slot_depth)
+
+    slot_size = ce * float(cfg.slot_fraction)
+    taper = float(getattr(cfg, "slot_miter_mm", 0.0))
+    taper = max(0.0, min(taper, d))
+
+    inner_open = slot_size - 2.0 * taper
+    inner_span = ce - 2.0 * wt
+    if inner_open <= 1.0 or inner_span <= 1.0:
+        return shell
+
+    dist = (inner_span - inner_open) / 2.0
+    if dist <= 0.8:
+        return shell
+
+    # Slot floor plane
+    z_floor = ce / 2.0 - d
+
+    ramp_h = dist  # 45°: rise == run
+    z_center = z_floor - ramp_h / 2.0
+
+    start_inset = float(getattr(cfg, "top_ramp_start_inset_mm", 0.4))
+    start_inset = max(0.2, min(start_inset, dist * 0.8))
+
+    # Outer block fills full interior span for the ramp height
+    outer_block = make_box(
+        extents=(inner_span, inner_span, ramp_h),
+        center=[0.0, 0.0, z_center],
+    )
+    outer_block = _sanitize(outer_block, "top_ramp_outer_block")
+
+    # Inner frustum cut: bottom opening close to inner_span, top opening == inner_open
+    bottom_open = max(1.0, inner_span - 2.0 * start_inset)
+    top_open = max(1.0, inner_open)
+
+    # taper needed so that (bottom_open - 2*taper_needed) == top_open
+    taper_needed = max(0.0, (bottom_open - top_open) / 2.0)
+
+    inner_cut = make_tapered_prism(
+        depth=ramp_h,
+        size_open_a=bottom_open,
+        size_open_b=bottom_open,
+        taper_mm=taper_needed,
+        axis="z",
+        open_positive=False,  # opening on -Z (bottom), smaller at +Z (top)
+    )
+    inner_cut.apply_translation([0.0, 0.0, z_center])
+    inner_cut = _sanitize(inner_cut, "top_ramp_inner_frustum_cut")
+
+    ramp_ring = _bool_difference(outer_block, inner_cut, what="creating top perimeter ramp ring")
+    ramp_ring = _sanitize(ramp_ring, "top_perimeter_ramp_ring")
+
+    # Union only (additive)
+    return _bool_union(shell, ramp_ring, what="adding top perimeter ramp ring")
+
+
+# -------------------------
+# Plate base (UNCHANGED)
 # -------------------------
 
 def create_plate_base(cfg: Config, text: str | None):
     """
     Plate plug is tapered to match the slot.
-
-    Slot:
-      opening = slot_size
-      inner   = slot_size - 2*taper
-
-    Plate plug:
-      opening = slot_size - 2*clearance
-      inner   = (slot_size - 2*taper) - 2*clearance
-
-    This keeps the same clearance at the opening and at full depth.
     """
-    slot_size = cfg.cube_edge * cfg.slot_fraction
-    d = cfg.slot_depth
+    slot_size = float(cfg.cube_edge) * float(cfg.slot_fraction)
+    d = float(cfg.slot_depth)
 
-    taper = float(getattr(cfg, "slot_miter_mm", d))
+    taper = float(getattr(cfg, "slot_miter_mm", 0.0))
     taper = max(0.0, min(taper, d))
 
-    plate_open = slot_size - 2.0 * cfg.clearance
-    plate_inner = max(1.0, (slot_size - 2.0 * taper) - 2.0 * cfg.clearance)
+    plate_open = slot_size - 2.0 * float(cfg.clearance)
+    plate_inner = max(1.0, (slot_size - 2.0 * taper) - 2.0 * float(cfg.clearance))
 
     # Convert that into an actual taper for the plate plug geometry
     plate_taper = (plate_open - plate_inner) / 2.0
@@ -392,26 +405,26 @@ def create_plate_base(cfg: Config, text: str | None):
     plate_thickness = d
 
     # Bezel flange (sits on cube face)
-    bezel_outer = slot_size + 2.0 * cfg.bezel_overhang
-    bezel_t = min(cfg.bezel_thickness, plate_thickness)
+    bezel_outer = slot_size + 2.0 * float(cfg.bezel_overhang)
+    bezel_t = min(float(cfg.bezel_thickness), plate_thickness)
 
     bezel = trimesh.creation.box(extents=(bezel_outer, bezel_outer, bezel_t))
-    bezel.apply_translation([plate_size / 2, plate_size / 2, plate_thickness - bezel_t / 2])
+    bezel.apply_translation([plate_size / 2.0, plate_size / 2.0, plate_thickness - bezel_t / 2.0])
 
     base = trimesh.util.concatenate([plug, bezel])
 
     # Optional embossed ID text in bottom quiet band
-    if text and cfg.bezel_text_enabled:
+    if text and getattr(cfg, "bezel_text_enabled", False):
         try:
-            marker_area = plate_size * cfg.plate_margin_fraction
+            marker_area = plate_size * float(cfg.plate_margin_fraction)
             margin_mm = (plate_size - marker_area) / 2.0
 
-            target_h = min(cfg.bezel_text_height_mm, max(2.0, margin_mm - 1.0))
-            depth = max(0.8, cfg.bezel_text_depth_mm)
+            target_h = min(float(cfg.bezel_text_height_mm), max(2.0, margin_mm - 1.0))
+            depth = max(0.8, float(cfg.bezel_text_depth_mm))
 
             txt = make_text_mesh(
                 text=text,
-                font=cfg.bezel_text_font,
+                font=getattr(cfg, "bezel_text_font", None),
                 font_size=10.0,
                 depth=depth,
                 target_height_mm=target_h,
